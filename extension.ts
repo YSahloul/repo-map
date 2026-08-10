@@ -28,8 +28,7 @@ async function resolveGitRoot(pi: ExtensionAPI): Promise<string | null> {
   }
 }
 
-/** Get all tracked source files (tree-sitter parseable) in the repo. */
-async function getSourceFiles(
+export async function getSourceFiles(
   pi: ExtensionAPI,
   gitRoot: string,
 ): Promise<string[]> {
@@ -47,7 +46,7 @@ async function getSourceFiles(
  * Matches aider's `get_ident_mentions`: split on \W+ (non-word chars),
  * collect unique words.
  */
-function getIdentMentions(text: string): Set<string> {
+export function getIdentMentions(text: string): Set<string> {
   const words = text.split(/\W+/);
   return new Set(words.filter(Boolean));
 }
@@ -57,7 +56,7 @@ function getIdentMentions(text: string): Set<string> {
  * without extension, ≥5 chars) matches the identifier (case-insensitive).
  * Matches aider's `get_ident_filename_matches`.
  */
-function getIdentFilenameMatches(
+export function getIdentFilenameMatches(
   idents: Set<string>,
   allSourceFiles: string[],
 ): Set<string> {
@@ -92,7 +91,7 @@ function getIdentFilenameMatches(
  *   matches a word, OR if its basename matches a word AND the basename
  *   contains `.`, `-`, `_`, or `/` AND is unique across the repo.
  */
-function getFileMentions(
+export function getFileMentions(
   content: string,
   allSourceFiles: string[],
 ): Set<string> {
@@ -145,7 +144,7 @@ function getFileMentions(
 /**
  * Extract the last user message content from the payload.
  */
-function getLastUserMessage(
+export function getLastUserMessage(
   payload: Record<string, unknown>,
 ): string | null {
   const messages = payload.messages;
@@ -172,7 +171,7 @@ function getLastUserMessage(
  * Inject the repo map as a user/assistant message pair after the
  * last user message, matching aider's format.
  */
-function injectMapAsMessagePair(
+export function injectMapAsMessagePair(
   payload: Record<string, unknown>,
   mapContent: string,
 ): Record<string, unknown> {
