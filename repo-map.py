@@ -31,7 +31,7 @@ def tracked_files(root):
             ["git", "-C", root, "ls-files"],
             capture_output=True, text=True, check=True, timeout=30,
         )
-        return [f for f in out.stdout.splitlines() if f and f != "MAP.md"]
+        return [f for f in out.stdout.splitlines() if f and f != "MAP.md" and not f.endswith(".d.ts")]
     except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
         return []
 
