@@ -1,6 +1,7 @@
 ---
 name: repo-map
 description: Generates and maintains MAP.md — a map of the current repo (tracked-file tree, per-file symbols, and stated purpose) so agents know what already exists and never recreate it. Use at the start of any coding task in a repo, when asked where something lives, when starting work in an unfamiliar repo, or after structural changes (new files/dirs, moves, renames). The map prevents duplicate implementation by making existing modules findable.
+alwaysApply: true
 ---
 
 # Repo Map

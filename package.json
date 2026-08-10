@@ -5,11 +5,17 @@
   "author": "Yousef Sahloul",
   "license": "MIT",
   "repository": "github:yousefsahloul/repo-map",
-  "keywords": ["omp", "pi", "repo-map", "codebase-index", "aider", "tree-sitter"],
+  "keywords": ["omp", "pi", "repo-map", "codebase-index", "aider", "tree-sitter", "extension"],
+  "omp": {
+    "extensions": ["./extension.ts"]
+  },
+  "pi": {
+    "extensions": ["./extension.ts"]
+  },
   "files": [
-    "plugin.yaml",
-    "hooks/",
+    "extension.ts",
+    "repo-map.py",
     "skills/",
-    "repo-map.py"
+    "README.md"
   ]
 }
