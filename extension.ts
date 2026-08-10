@@ -253,93 +253,55 @@ export default function repoMap(pi: ExtensionAPI) {
   pi.on(
     "before_provider_request",
     async (payload: Record<string, unknown>) => {
-      const debug = pi.getFlag("repo-map.debug") ?? false;
-      const log = (...args: any[]) => { if (debug) pi.logger?.warn("[repo-map] " + args.join(" ")); };
+      const L = (msg: string) => pi.logger?.warn("[repo-map] " + msg);
       try {
-        // 1. Resolve git root
+        // Always dump payload structure on every call
+        const keys = Object.keys(payload);
+        const msgCount = Array.isArray(payload.messages) ? (payload.messages as any[]).length : 0;
+        const roles = Array.isArray(payload.messages)
+          ? (payload.messages as any[]).map((m: any) => m.role).join(",")
+          : "no-array";
+        L("fired: payload keys=" + keys.join(",") + " msgs=" + msgCount + " roles=[" + roles + "]");
         const gitRoot = await resolveGitRoot(pi);
-        if (!gitRoot) { log("skip: not a git repo"); return payload; }
-        // 2. Per-project opt-out (.no-repo-map)
-        if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) {
-          log("skip: .no-repo-map found"); return payload;
-        }
-        // 3. Mode gate
+        if (!gitRoot) { L("skip: not a git repo"); return payload; }
+        if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) { L("skip: .no-repo-map"); return payload; }
+
         const mode = pi.getFlag("repo-map.mode") || "auto";
+        if (mode !== "auto") { L("skip: mode=" + mode); return payload; }
 
         const lastUserMsg = getLastUserMessage(payload);
-        if (!lastUserMsg) {
-          const roles = Array.isArray(payload.messages) ? (payload.messages as any[]).map((m: any) => m.role).join(",") : "no-messages";
-          log("skip: no user message. roles=[" + roles + "]");
-          return payload;
-        }
-        // 5. Get tracked source files
+        if (!lastUserMsg) { L("skip: no user message"); return payload; }
+
         const sourceFiles = await getSourceFiles(pi, gitRoot);
-        if (sourceFiles.length === 0) { log("skip: no source files found"); return payload; }
+        if (sourceFiles.length === 0) { L("skip: no source files"); return payload; }
 
-        log(`gitRoot=${gitRoot}, sourceFiles=${sourceFiles.length}, msg="${lastUserMsg.slice(0, 80)}"`);
+        L("git=" + gitRoot + " src=" + sourceFiles.length + " msg=" + lastUserMsg.slice(0, 80));
 
-        // 6. Extract file and identifier mentions
         const fileMentions = getFileMentions(lastUserMsg, sourceFiles);
         const idents = getIdentMentions(lastUserMsg);
         const identFileMatches = getIdentFilenameMatches(idents, sourceFiles);
-
-        // Union all mentioned files
-        const mentionedFnames = new Set([
-          ...fileMentions,
-          ...identFileMatches,
-        ]);
-
+        const mentionedFnames = new Set([...fileMentions, ...identFileMatches]);
         const mentionedIdents = idents;
 
-        if (debug) {
-          log(`message: "${lastUserMsg.slice(0, 120)}${lastUserMsg.length > 120 ? "..." : ""}"`);
-          log(`source files: ${sourceFiles.length}, mentioned: ${mentionedFnames.size} files, ${mentionedIdents.size} idents`);
-          if (mentionedFnames.size > 0) log("files:", [...mentionedFnames].slice(0, 10));
-        }
+        L("mentioned: " + mentionedFnames.size + " files, " + mentionedIdents.size + " idents");
+        if (mentionedFnames.size > 0) L("files: " + [...mentionedFnames].slice(0, 10).join(", "));
 
-        // 7. Generate map with mention hints (stdout only, no MAP.md)
-        const args = [
-          scriptPath,
-          gitRoot,
-          "--quiet",
-          "--no-file",
-        ];
-        if (mentionedFnames.size > 0) {
-          args.push("--mentioned-fnames", JSON.stringify([...mentionedFnames]));
-        }
-        if (mentionedIdents.size > 0) {
-          args.push("--mentioned-idents", JSON.stringify([...mentionedIdents]));
-        }
+        const args = [scriptPath, gitRoot, "--quiet", "--no-file"];
+        if (mentionedFnames.size > 0) args.push("--mentioned-fnames", JSON.stringify([...mentionedFnames]));
+        if (mentionedIdents.size > 0) args.push("--mentioned-idents", JSON.stringify([...mentionedIdents]));
 
         const pyResult = await pi.exec("python3", args, { timeout: 120000 });
         if (pyResult.exitCode !== 0 || !pyResult.stdout?.trim()) {
-          log(`generation failed: ${pyResult.stderr || "empty output"}`);
-          pi.logger?.warn(
-            `repo-map generation failed: ${pyResult.stderr || "empty output"}`,
-          );
+          L("gen-failed: " + (pyResult.stderr || "empty"));
           return payload;
         }
 
-        if (debug) {
-          const beforeCount = Array.isArray(payload.messages) ? payload.messages.length : 0;
-          log(`map: ${pyResult.stdout.length} chars, messages before: ${beforeCount}`);
-        }
-
-        // 8. Inject as user/assistant message pair (aider format)
+        L("map-chars=" + pyResult.stdout.length);
         const injected = injectMapAsMessagePair(payload, pyResult.stdout.trim());
-
-        if (debug) {
-          const afterCount = Array.isArray(injected.messages) ? injected.messages.length : 0;
-          log(`messages after: ${afterCount} (added user+assistant pair)`);
-          const roles = Array.isArray(injected.messages)
-            ? (injected.messages as any[]).map((m: any) => m.role).join(" → ")
-            : "n/a";
-          log(`message roles: ${roles}`);
-        }
-
+        L("injected: " + (Array.isArray(payload.messages) ? (payload.messages as any[]).length : 0) + " msgs -> " + (Array.isArray(injected.messages) ? (injected.messages as any[]).length : 0));
         return injected;
       } catch (err) {
-        pi.logger?.warn(`repo-map injection error: ${err}`);
+        pi.logger?.warn("repo-map injection error: " + err);
         return payload;
       }
     },
