@@ -182,7 +182,16 @@ export default function repoMap(pi: ExtensionAPI) {
 
         L("generated " + pyResult.stdout.length + " chars — injecting");
         const injected = injectMapAsMessagePair(payload, pyResult.stdout.trim());
-        L("done — handler returned modified payload");
+        // Log what the model actually receives
+        const msgs = Array.isArray(injected.messages) || (injected.payload && typeof injected.payload === "object" && Array.isArray((injected.payload as any).messages))
+          ? (Array.isArray(injected.messages) ? injected.messages as any[] : (injected.payload as any).messages as any[])
+          : [];
+        L("MODEL RECEIVES " + msgs.length + " messages:");
+        for (let i = 0; i < msgs.length; i++) {
+          const m = msgs[i];
+          const preview = typeof m.content === "string" ? m.content.slice(0, 100).replace(/\n/g, "\\n") : "[complex content]";
+          L("  [" + i + "] " + m.role + ": " + preview);
+        }
         return injected;
       } catch (e: any) {
         L("error: " + (e?.message || String(e)));
