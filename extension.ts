@@ -1,13 +1,21 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import * as path from "node:path";
 import * as fs from "node:fs";
-
 // Resolve extension directory from this module's URL
 const extDir = path.dirname(new URL(import.meta.url).pathname);
 const scriptPath = path.join(extDir, "repo-map.py");
 
-function stripHeadSha(mapContent: string): string {
-  return mapContent.replace(/^<!-- HEAD: [a-f0-9]+ -->\n/m, "");
+// Source file extensions aider's tree-sitter can parse
+const SOURCE_EXTENSIONS = new Set([
+  ".ts", ".tsx", ".js", ".jsx", ".py", ".rs", ".go", ".java", ".rb",
+  ".php", ".c", ".cpp", ".h", ".hpp", ".cs", ".swift", ".kt", ".scala",
+  ".vue", ".svelte", ".css", ".scss", ".json", ".yaml", ".yml", ".toml",
+  ".sql", ".sh", ".bash",
+]);
+
+function isSourceFile(fname: string): boolean {
+  const ext = path.extname(fname).toLowerCase();
+  return SOURCE_EXTENSIONS.has(ext);
 }
 
 async function resolveGitRoot(pi: ExtensionAPI): Promise<string | null> {
@@ -20,94 +28,179 @@ async function resolveGitRoot(pi: ExtensionAPI): Promise<string | null> {
   }
 }
 
-async function ensureMapFresh(
+/** Get all tracked source files (tree-sitter parseable) in the repo. */
+async function getSourceFiles(
   pi: ExtensionAPI,
   gitRoot: string,
-): Promise<string | null> {
-  const mapPath = path.join(gitRoot, "MAP.md");
+): Promise<string[]> {
+  try {
+    const result = await pi.exec("git", ["-C", gitRoot, "ls-files", "--full-name"]);
+    const files = (result.stdout || "").split("\n").filter(Boolean);
+    return files.filter(isSourceFile);
+  } catch {
+    return [];
+  }
+}
 
-  // Check existing MAP.md freshness
-  if (fs.existsSync(mapPath)) {
-    const existingMap = fs.readFileSync(mapPath, "utf-8");
-    const shaMatch = existingMap.match(/^<!-- HEAD: ([a-f0-9]+) -->/m);
+/**
+ * Extract identifier mentions from text.
+ * Matches aider's `get_ident_mentions`: split on \W+ (non-word chars),
+ * collect unique words.
+ */
+function getIdentMentions(text: string): Set<string> {
+  const words = text.split(/\W+/);
+  return new Set(words.filter(Boolean));
+}
 
-    let currentSha: string | null = null;
-    try {
-      const shaResult = await pi.exec("git", ["-C", gitRoot, "rev-parse", "HEAD"]);
-      currentSha = shaResult.stdout?.trim() || null;
-    } catch {
-      // Can't get SHA — regenerate
-    }
-
-    if (shaMatch && currentSha && shaMatch[1] === currentSha) {
-      // SHA matches — check working tree for uncommitted changes
-      try {
-        await pi.exec("git", ["-C", gitRoot, "diff", "--quiet", "HEAD"]);
-        // exit 0 = clean — MAP.md is fresh
-        return stripHeadSha(existingMap);
-      } catch {
-        // diff --quiet exits non-zero when dirty → stale
-      }
+/**
+ * Map identifier mentions to filenames where the file stem (basename
+ * without extension, ≥5 chars) matches the identifier (case-insensitive).
+ * Matches aider's `get_ident_filename_matches`.
+ */
+function getIdentFilenameMatches(
+  idents: Set<string>,
+  allSourceFiles: string[],
+): Set<string> {
+  const stemToFiles = new Map<string, string[]>();
+  for (const fname of allSourceFiles) {
+    const base = path.basename(fname);
+    const stem = base.replace(/\.[^.]+$/, "").toLowerCase();
+    if (stem.length >= 5) {
+      const existing = stemToFiles.get(stem) || [];
+      existing.push(fname);
+      stemToFiles.set(stem, existing);
     }
   }
 
-  // Regenerate
-  try {
-    const pyResult = await pi.exec(
-      "python3",
-      [scriptPath, gitRoot, "--quiet"],
-      { timeout: 120000 },
-    );
-    if (pyResult.exitCode !== 0) {
-      pi.logger?.warn(
-        `repo-map auto-generation failed: ${pyResult.stderr}`,
-      );
+  const matches = new Set<string>();
+  for (const ident of idents) {
+    if (ident.length < 5) continue;
+    const files = stemToFiles.get(ident.toLowerCase());
+    if (files) {
+      for (const f of files) matches.add(f);
+    }
+  }
+  return matches;
+}
+
+/**
+ * Extract file mentions from message text.
+ * Matches aider's `get_file_mentions`:
+ * - Split message on whitespace into words
+ * - Strip trailing punctuation and surrounding quotes/backticks
+ * - A file is mentioned if its relative path (normalized to /) exactly
+ *   matches a word, OR if its basename matches a word AND the basename
+ *   contains `.`, `-`, `_`, or `/` AND is unique across the repo.
+ */
+function getFileMentions(
+  content: string,
+  allSourceFiles: string[],
+): Set<string> {
+  // Split on whitespace, clean each word
+  const rawWords = content.split(/\s+/);
+  const words = new Set<string>();
+  for (const w of rawWords) {
+    let cleaned = w;
+    // Strip trailing punctuation
+    cleaned = cleaned.replace(/[,.!;:?]+$/, "");
+    // Strip surrounding quotes and backticks
+    cleaned = cleaned.replace(/^["'`*_]+|["'`*_]+$/g, "");
+    if (cleaned) words.add(cleaned);
+  }
+
+  const mentioned = new Set<string>();
+  const fnameToRelFnames = new Map<string, string[]>();
+
+  for (const relFname of allSourceFiles) {
+    const normalizedRelFname = relFname.replace(/\\/g, "/");
+
+    // True relative-path match (normalized to /)
+    for (const word of words) {
+      if (word.replace(/\\/g, "/") === normalizedRelFname) {
+        mentioned.add(relFname);
+        break;
+      }
+    }
+
+    const base = path.basename(relFname);
+
+    // Only consider basenames that contain . - _ or / (not plain words like "run")
+    if (/[.\/\-_]/.test(base)) {
+      const existing = fnameToRelFnames.get(base) || [];
+      existing.push(relFname);
+      fnameToRelFnames.set(base, existing);
+    }
+  }
+
+  // Unique basename mentions
+  for (const [base, relFnames] of fnameToRelFnames) {
+    if (relFnames.length === 1 && words.has(base)) {
+      mentioned.add(relFnames[0]);
+    }
+  }
+
+  return mentioned;
+}
+
+/**
+ * Extract the last user message content from the payload.
+ */
+function getLastUserMessage(
+  payload: Record<string, unknown>,
+): string | null {
+  const messages = payload.messages;
+  if (!Array.isArray(messages)) return null;
+
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m?.role === "user") {
+      if (typeof m.content === "string") return m.content;
+      if (Array.isArray(m.content)) {
+        // Concatenate text blocks
+        return m.content
+          .filter((b: any) => b.type === "text")
+          .map((b: any) => b.text)
+          .join("\n");
+      }
       return null;
     }
-    if (fs.existsSync(mapPath)) {
-      return stripHeadSha(fs.readFileSync(mapPath, "utf-8"));
-    }
-  } catch (err) {
-    pi.logger?.warn(`repo-map auto-generation error: ${err}`);
   }
   return null;
 }
 
-function injectMapIntoPayload(
+/**
+ * Inject the repo map as a user/assistant message pair after the
+ * last user message, matching aider's format.
+ */
+function injectMapAsMessagePair(
   payload: Record<string, unknown>,
   mapContent: string,
 ): Record<string, unknown> {
-  // Handle messages-array payload (most providers)
-  if (Array.isArray(payload.messages)) {
-    const sysIdx = payload.messages.findIndex(
-      (m: any) => m?.role === "system",
-    );
-    if (sysIdx >= 0) {
-      const existing = payload.messages[sysIdx];
-      if (typeof existing.content === "string") {
-        existing.content = mapContent + "\n\n" + existing.content;
-      } else if (Array.isArray(existing.content)) {
-        existing.content.unshift({ type: "text", text: mapContent + "\n\n" });
-      }
-    } else {
-      payload.messages.unshift({ role: "system", content: mapContent });
+  if (!Array.isArray(payload.messages)) return payload;
+
+  // Find the last user message index
+  let lastUserIdx = -1;
+  for (let i = payload.messages.length - 1; i >= 0; i--) {
+    if ((payload.messages[i] as any)?.role === "user") {
+      lastUserIdx = i;
+      break;
     }
-    return payload;
   }
+  if (lastUserIdx < 0) return payload;
 
-  // Handle system-string payload (some providers)
-  if (typeof payload.system === "string") {
-    payload.system = mapContent + "\n\n" + payload.system;
-    return payload;
-  }
-
+  // Insert the map user/assistant pair after the last user message
+  const mapMessages = [
+    { role: "user", content: mapContent },
+    { role: "assistant", content: "Ok, I won't try and edit those files without asking first." },
+  ];
+  payload.messages.splice(lastUserIdx + 1, 0, ...mapMessages);
   return payload;
 }
 
 export default function repoMap(pi: ExtensionAPI) {
   pi.setLabel("Repo Map");
 
-  // 2a. Mode flag — controls auto/manual/off
+  // Mode flag — controls auto/manual/off
   pi.registerFlag({
     name: "repo-map.mode",
     type: "string",
@@ -116,7 +209,7 @@ export default function repoMap(pi: ExtensionAPI) {
       "'auto' injects before every LLM call; 'manual' uses /repo-map command only; 'off' disables",
   });
 
-  // 2b. /repo-map slash command
+  // /repo-map slash command — writes MAP.md for manual inspection
   pi.registerCommand("repo-map", {
     description: "Generate or refresh the repo map (MAP.md)",
     handler: async (_args, ctx) => {
@@ -149,7 +242,7 @@ export default function repoMap(pi: ExtensionAPI) {
     },
   });
 
-  // 2c. Auto-injection before every provider request
+  // Auto-injection before every provider request — per-turn dynamic map
   pi.on(
     "before_provider_request",
     async (payload: Record<string, unknown>) => {
@@ -157,22 +250,58 @@ export default function repoMap(pi: ExtensionAPI) {
         // 1. Resolve git root
         const gitRoot = await resolveGitRoot(pi);
         if (!gitRoot) return payload;
-
         // 2. Per-project opt-out (.no-repo-map)
         if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) {
           return payload;
         }
-
         // 3. Mode gate
         const mode = pi.getFlag("repo-map.mode");
         if (mode !== "auto") return payload;
 
-        // 4. Ensure MAP.md is fresh (generate if missing/stale)
-        const mapContent = await ensureMapFresh(pi, gitRoot);
-        if (!mapContent) return payload;
+        // 4. Extract mentions from the last user message
+        const lastUserMsg = getLastUserMessage(payload);
+        if (!lastUserMsg) return payload;
 
-        // 5. Inject into provider request payload
-        return injectMapIntoPayload(payload, mapContent);
+        // 5. Get tracked source files
+        const sourceFiles = await getSourceFiles(pi, gitRoot);
+        if (sourceFiles.length === 0) return payload;
+
+        // 6. Extract file and identifier mentions
+        const fileMentions = getFileMentions(lastUserMsg, sourceFiles);
+        const idents = getIdentMentions(lastUserMsg);
+        const identFileMatches = getIdentFilenameMatches(idents, sourceFiles);
+
+        // Union all mentioned files
+        const mentionedFnames = new Set([
+          ...fileMentions,
+          ...identFileMatches,
+        ]);
+        const mentionedIdents = idents;
+
+        // 7. Generate map with mention hints (stdout only, no MAP.md)
+        const args = [
+          scriptPath,
+          gitRoot,
+          "--quiet",
+          "--no-file",
+        ];
+        if (mentionedFnames.size > 0) {
+          args.push("--mentioned-fnames", JSON.stringify([...mentionedFnames]));
+        }
+        if (mentionedIdents.size > 0) {
+          args.push("--mentioned-idents", JSON.stringify([...mentionedIdents]));
+        }
+
+        const pyResult = await pi.exec("python3", args, { timeout: 120000 });
+        if (pyResult.exitCode !== 0 || !pyResult.stdout?.trim()) {
+          pi.logger?.warn(
+            `repo-map generation failed: ${pyResult.stderr || "empty output"}`,
+          );
+          return payload;
+        }
+
+        // 8. Inject as user/assistant message pair (aider format)
+        return injectMapAsMessagePair(payload, pyResult.stdout.trim());
       } catch (err) {
         pi.logger?.warn(`repo-map injection error: ${err}`);
         return payload;

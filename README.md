@@ -1,15 +1,15 @@
 # repo-map
 
-Auto-injected repo map for omp coding agents. Uses aider's tree-sitter engine to build a ranked map of the current repository — injected before every LLM call so agents never recreate existing code.
+Auto-injected repo map for omp coding agents. Uses aider's tree-sitter engine to build a ranked map of the current repository — generated dynamically **per turn** with query-aware file boosting, exactly like aider's own repo map.
 
 ## What it does
 
-Like aider's own repo map, but as a standalone omp extension. Three modes:
+Like aider's `get_repo_map()`, but as a standalone omp extension. Three modes:
 
 | Mode | Behavior |
 |---|---|
-| `auto` | MAP.md injected before every provider request; auto-regenerated when stale |
-| `manual` (default) | No automatic injection; use `/repo-map` command on demand |
+| `auto` | On every provider request: extracts file and identifier mentions from your message, generates a fresh repo map with those files boosted, and injects it as context |
+| `manual` (default) | No automatic injection; use `/repo-map` command on demand to write `MAP.md` |
 | `off` | Disabled entirely |
 
 Per-project opt-out: `touch .no-repo-map` in the repo root (works even when global mode is `auto`).
@@ -37,15 +37,16 @@ repo-map:
 
 ## Commands
 
-- `/repo-map` — generate or refresh MAP.md for the current git repo
+- `/repo-map` — generate or refresh MAP.md for the current git repo (for manual inspection)
 
 ## How it works
 
-- **Extension API**: omp-native TypeScript extension using `registerFlag`, `registerCommand`, and `before_provider_request` event
-- **Tree-sitter** (via aider): precise, language-aware symbol extraction
-- **PageRank** ranking: important files first, not alphabetical
-- **Mtime-based caching**: only re-parses changed files
-- **HEAD SHA stamping**: `MAP.md` records the git SHA; injection skips regen when nothing changed
+- **Per-turn dynamic generation**: the map is rebuilt every LLM call using `repo-map.py --no-file` (stdout only, no `MAP.md` disk artifact)
+- **Query-aware boosting**: file names and identifiers mentioned in your message are extracted and passed as hints to aider's PageRank engine — mentioned files rank higher in the output
+- **Mention extraction**: mirrors aider's `get_file_mentions()` (exact path matches + unique basenames with `.`, `-`, `_`), `get_ident_mentions()`, and `get_ident_filename_matches()` (stem ≥5 chars matched to identifiers)
+- **Injection format**: map content is injected as a `user`/`assistant` message pair after the user's message — same position and format aider uses (`base_coder.py:695-706`)
+- **Tree-sitter** (via aider): precise, language-aware symbol extraction with tag caching for speed
+- **Fallback safe**: on timeout or error, injection is skipped; the LLM call proceeds normally
 
 ## Structure
 

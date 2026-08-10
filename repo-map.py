@@ -5,6 +5,8 @@ Requires aider installed (the user has it). Runs from aider's venv Python.
 Uses aider's own tag cache (.aider.tags.cache.v*/) for speed after first run.
 Stdlib + aider; no extra deps.
 """
+import json
+
 import argparse
 import datetime
 import os
@@ -64,12 +66,15 @@ def shutil_locate(name):
     return which(name)
 
 
-def generate_map(root, max_tokens=0):
+def generate_map(root, max_tokens=0, mentioned_fnames=None, mentioned_idents=None):
     """Produce the repo map text using aider's RepoMap engine.
 
     max_tokens=0 means no limit — passes a large token budget.
     Otherwise used as aider's map_tokens base (which gets 8x expanded
     when chat_files is empty, matching aider's own behavior).
+
+    mentioned_fnames/mentioned_idents: optional sets to boost relevance
+    of files/identifiers mentioned in the user's message (aider-style).
     """
     aider_py = find_aider_python()
     if not aider_py:
@@ -84,6 +89,18 @@ def generate_map(root, max_tokens=0):
         ctx_window = 1_000_000
     else:
         ctx_window = max(8192, max_tokens * 8)
+
+    # Build mentioned_fnames/mentioned_idents args if provided
+    mentions_arg = ""
+    if mentioned_fnames is not None and mentioned_idents is not None:
+        mentions_arg = (
+            f", mentioned_fnames={sorted(mentioned_fnames)!r},"
+            f" mentioned_idents={sorted(mentioned_idents)!r}"
+        )
+    elif mentioned_fnames is not None:
+        mentions_arg = f", mentioned_fnames={sorted(mentioned_fnames)!r}"
+    elif mentioned_idents is not None:
+        mentions_arg = f", mentioned_idents={sorted(mentioned_idents)!r}"
 
     script = textwrap.dedent(f"""
         import os, sys
@@ -102,7 +119,7 @@ def generate_map(root, max_tokens=0):
         # Only pass source files tree-sitter can parse
         all_files = {raw_files!r}
         src_files = [f for f in all_files if filename_to_lang(f)]
-        result = rm.get_repo_map(chat_files=[], other_files=src_files)
+        result = rm.get_repo_map(chat_files=[], other_files=src_files{mentions_arg})
         if result:
             print(result)
     """)
@@ -130,28 +147,53 @@ def head_sha(root):
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
         return None
 
-
 def main():
     ap = argparse.ArgumentParser(description="Generate MAP.md using aider's repomap engine.")
     ap.add_argument("path", nargs="?", default=os.getcwd(), help="start dir (default: cwd)")
     ap.add_argument("--tokens", type=int, default=0, help="max map tokens (0 = no limit)")
     ap.add_argument("--quiet", action="store_true", help="suppress progress output on stderr")
+    ap.add_argument("--mentioned-fnames", type=str, default=None,
+                    help="JSON array of filenames mentioned in user message")
+    ap.add_argument("--mentioned-idents", type=str, default=None,
+                    help="JSON array of identifiers mentioned in user message")
+    ap.add_argument("--no-file", action="store_true",
+                    help="skip writing MAP.md, print content to stdout only")
     args = ap.parse_args()
 
     root = git_root(args.path) or os.path.abspath(args.path)
     repo_name = os.path.basename(root.rstrip(os.sep)) or root
-    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    sha = head_sha(root)
+
+    # Parse mention hints
+    mentioned_fnames = None
+    mentioned_idents = None
+    if args.mentioned_fnames:
+        try:
+            mentioned_fnames = set(json.loads(args.mentioned_fnames))
+        except (json.JSONDecodeError, TypeError):
+            print(f"Warning: invalid --mentioned-fnames JSON, ignoring", file=sys.stderr)
+    if args.mentioned_idents:
+        try:
+            mentioned_idents = set(json.loads(args.mentioned_idents))
+        except (json.JSONDecodeError, TypeError):
+            print(f"Warning: invalid --mentioned-idents JSON, ignoring", file=sys.stderr)
 
     if not args.quiet:
         print(f"Building map for {repo_name} ({root})...", file=sys.stderr)
-    body, err = generate_map(root, args.tokens)
+    body, err = generate_map(root, args.tokens, mentioned_fnames, mentioned_idents)
     if err:
         print(f"Error: {err}", file=sys.stderr)
         sys.exit(1)
     if not body:
         print("Error: aider produced empty map", file=sys.stderr)
         sys.exit(1)
+
+    # --no-file: print raw body to stdout, don't write MAP.md
+    if args.no_file:
+        print(body)
+        return
+
+    stamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+    sha = head_sha(root)
 
     header = (
         f"<!-- HEAD: {sha} -->\n"
