@@ -28,7 +28,7 @@ async function resolveGitRoot(pi: ExtensionAPI): Promise<string | null> {
   }
 }
 
-export async function getSourceFiles(
+async function getSourceFiles(
   pi: ExtensionAPI,
   gitRoot: string,
 ): Promise<string[]> {
@@ -46,7 +46,7 @@ export async function getSourceFiles(
  * Matches aider's `get_ident_mentions`: split on \W+ (non-word chars),
  * collect unique words.
  */
-export function getIdentMentions(text: string): Set<string> {
+function getIdentMentions(text: string): Set<string> {
   const words = text.split(/\W+/);
   return new Set(words.filter(Boolean));
 }
@@ -56,7 +56,7 @@ export function getIdentMentions(text: string): Set<string> {
  * without extension, ≥5 chars) matches the identifier (case-insensitive).
  * Matches aider's `get_ident_filename_matches`.
  */
-export function getIdentFilenameMatches(
+function getIdentFilenameMatches(
   idents: Set<string>,
   allSourceFiles: string[],
 ): Set<string> {
@@ -91,7 +91,7 @@ export function getIdentFilenameMatches(
  *   matches a word, OR if its basename matches a word AND the basename
  *   contains `.`, `-`, `_`, or `/` AND is unique across the repo.
  */
-export function getFileMentions(
+function getFileMentions(
   content: string,
   allSourceFiles: string[],
 ): Set<string> {
@@ -144,7 +144,7 @@ export function getFileMentions(
 /**
  * Extract the last user message content from the payload.
  */
-export function getLastUserMessage(
+function getLastUserMessage(
   payload: Record<string, unknown>,
 ): string | null {
   const messages = payload.messages;
@@ -171,7 +171,7 @@ export function getLastUserMessage(
  * Inject the repo map as a user/assistant message pair after the
  * last user message, matching aider's format.
  */
-export function injectMapAsMessagePair(
+function injectMapAsMessagePair(
   payload: Record<string, unknown>,
   mapContent: string,
 ): Record<string, unknown> {
