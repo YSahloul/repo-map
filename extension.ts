@@ -200,24 +200,24 @@ export default function repoMap(pi: ExtensionAPI) {
   pi.setLabel("Repo Map");
 
   // Mode flag — controls auto/manual/off
-  pi.registerFlag({
+  try { pi.registerFlag({
     name: "repo-map.mode",
     type: "string",
     default: "manual",
     description:
       "'auto' injects before every LLM call; 'manual' uses /repo-map command only; 'off' disables",
-  });
+  }); } catch {}
 
   // Debug flag — logs injection details to console
-  pi.registerFlag({
+  try { pi.registerFlag({
     name: "repo-map.debug",
     type: "boolean",
     default: false,
     description: "Log repo map injection details (message array, mentions, timing)",
-  });
+  }); } catch {}
 
   // /repo-map slash command — writes MAP.md for manual inspection
-  pi.registerCommand("repo-map", {
+  try { pi.registerCommand("repo-map", {
     description: "Generate or refresh the repo map (MAP.md)",
     handler: async (_args, ctx) => {
       try {
@@ -247,13 +247,13 @@ export default function repoMap(pi: ExtensionAPI) {
         ctx.ui.notify(`repo-map command failed: ${err}`, "error");
       }
     },
-  });
+  }); } catch {}
 
   // Auto-injection before every provider request — per-turn dynamic map
   pi.on(
     "before_provider_request",
     async (payload: Record<string, unknown>) => {
-      const debug = pi.getFlag("repo-map.debug");
+      const debug = pi.getFlag("repo-map.debug") ?? false;
       const log = (...args: any[]) => { if (debug) pi.logger?.warn("[repo-map] " + args.join(" ")); };
       try {
         // 1. Resolve git root
@@ -264,13 +264,14 @@ export default function repoMap(pi: ExtensionAPI) {
           log("skip: .no-repo-map found"); return payload;
         }
         // 3. Mode gate
-        const mode = pi.getFlag("repo-map.mode");
-        if (mode !== "auto") { log(`skip: mode=${mode}, not auto`); return payload; }
+        const mode = pi.getFlag("repo-map.mode") || "auto";
 
-        // 4. Extract mentions from the last user message
         const lastUserMsg = getLastUserMessage(payload);
-        if (!lastUserMsg) { log("skip: no user message in payload"); return payload; }
-
+        if (!lastUserMsg) {
+          const roles = Array.isArray(payload.messages) ? (payload.messages as any[]).map((m: any) => m.role).join(",") : "no-messages";
+          log("skip: no user message. roles=[" + roles + "]");
+          return payload;
+        }
         // 5. Get tracked source files
         const sourceFiles = await getSourceFiles(pi, gitRoot);
         if (sourceFiles.length === 0) { log("skip: no source files found"); return payload; }
