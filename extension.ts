@@ -33,9 +33,7 @@ async function ensureMapFresh(
 
     let currentSha: string | null = null;
     try {
-      const shaResult = await pi.exec("git", ["rev-parse", "HEAD"], {
-        cwd: gitRoot,
-      });
+      const shaResult = await pi.exec("git", ["-C", gitRoot, "rev-parse", "HEAD"]);
       currentSha = shaResult.stdout?.trim() || null;
     } catch {
       // Can't get SHA — regenerate
@@ -44,7 +42,7 @@ async function ensureMapFresh(
     if (shaMatch && currentSha && shaMatch[1] === currentSha) {
       // SHA matches — check working tree for uncommitted changes
       try {
-        await pi.exec("git", ["diff", "--quiet", "HEAD"], { cwd: gitRoot });
+        await pi.exec("git", ["-C", gitRoot, "diff", "--quiet", "HEAD"]);
         // exit 0 = clean — MAP.md is fresh
         return stripHeadSha(existingMap);
       } catch {
