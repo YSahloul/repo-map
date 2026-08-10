@@ -1,0 +1,15 @@
+{
+  "name": "@yousefsahloul/repo-map",
+  "version": "0.1.0",
+  "description": "Auto-injected repo map plugin for omp and pi coding agents. Prevents recreating existing code by always showing what's already there.",
+  "author": "Yousef Sahloul",
+  "license": "MIT",
+  "repository": "github:yousefsahloul/repo-map",
+  "keywords": ["omp", "pi", "repo-map", "codebase-index", "aider", "tree-sitter"],
+  "files": [
+    "plugin.yaml",
+    "hooks/",
+    "skills/",
+    "repo-map.py"
+  ]
+}
