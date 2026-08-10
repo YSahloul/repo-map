@@ -147,19 +147,21 @@ function getFileMentions(
 function getLastUserMessage(
   payload: Record<string, unknown>,
 ): string | null {
-  const messages = payload.messages;
-  if (!Array.isArray(messages)) return null;
+  // Try top-level messages first (interactive mode)
+  let messages: any[] | null = Array.isArray(payload.messages) ? (payload.messages as any[]) : null;
+  // Try nested payload.messages (omp -p mode: { type, payload: { messages } })
+  if (!messages && typeof payload.payload === "object" && payload.payload !== null) {
+    const inner = payload.payload as Record<string, unknown>;
+    if (Array.isArray(inner.messages)) messages = inner.messages as any[];
+  }
+  if (!messages) return null;
 
   for (let i = messages.length - 1; i >= 0; i--) {
     const m = messages[i];
     if (m?.role === "user") {
       if (typeof m.content === "string") return m.content;
       if (Array.isArray(m.content)) {
-        // Concatenate text blocks
-        return m.content
-          .filter((b: any) => b.type === "text")
-          .map((b: any) => b.text)
-          .join("\n");
+        return m.content.filter((b: any) => b.type === "text").map((b: any) => b.text).join("\n");
       }
       return null;
     }
@@ -175,24 +177,25 @@ function injectMapAsMessagePair(
   payload: Record<string, unknown>,
   mapContent: string,
 ): Record<string, unknown> {
-  if (!Array.isArray(payload.messages)) return payload;
+  // Find the messages array (top-level or nested in payload.payload)
+  let messages: any[] | null = Array.isArray(payload.messages) ? (payload.messages as any[]) : null;
+  let isNested = false;
+  if (!messages && typeof payload.payload === "object" && payload.payload !== null) {
+    const inner = payload.payload as Record<string, unknown>;
+    if (Array.isArray(inner.messages)) { messages = inner.messages as any[]; isNested = true; }
+  }
+  if (!messages) return payload;
 
-  // Find the last user message index
   let lastUserIdx = -1;
-  for (let i = payload.messages.length - 1; i >= 0; i--) {
-    if ((payload.messages[i] as any)?.role === "user") {
-      lastUserIdx = i;
-      break;
-    }
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i]?.role === "user") { lastUserIdx = i; break; }
   }
   if (lastUserIdx < 0) return payload;
 
-  // Insert the map user/assistant pair after the last user message
-  const mapMessages = [
+  messages.splice(lastUserIdx + 1, 0,
     { role: "user", content: mapContent },
     { role: "assistant", content: "Ok, I won't try and edit those files without asking first." },
-  ];
-  payload.messages.splice(lastUserIdx + 1, 0, ...mapMessages);
+  );
   return payload;
 }
 
