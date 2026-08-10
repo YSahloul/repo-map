@@ -292,10 +292,9 @@ export default function repoMap(pi: ExtensionAPI) {
         const args = [scriptPath, gitRoot, "--quiet", "--no-file"];
         if (mentionedFnames.size > 0) args.push("--mentioned-fnames", JSON.stringify([...mentionedFnames]));
         if (mentionedIdents.size > 0) args.push("--mentioned-idents", JSON.stringify([...mentionedIdents]));
-
         const pyResult = await pi.exec("python3", args, { timeout: 120000 });
         if (pyResult.exitCode !== 0 || !pyResult.stdout?.trim()) {
-          L("gen-failed: " + (pyResult.stderr || "empty"));
+          L("gen-failed: exit=" + pyResult.exitCode + " stderr=" + (pyResult.stderr || "(none)").slice(0, 200) + " stdout-len=" + (pyResult.stdout?.length || 0));
           return payload;
         }
 
