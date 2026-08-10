@@ -208,6 +208,14 @@ export default function repoMap(pi: ExtensionAPI) {
       "'auto' injects before every LLM call; 'manual' uses /repo-map command only; 'off' disables",
   });
 
+  // Debug flag — logs injection details to console
+  pi.registerFlag({
+    name: "repo-map.debug",
+    type: "boolean",
+    default: false,
+    description: "Log repo map injection details (message array, mentions, timing)",
+  });
+
   // /repo-map slash command — writes MAP.md for manual inspection
   pi.registerCommand("repo-map", {
     description: "Generate or refresh the repo map (MAP.md)",
@@ -245,6 +253,8 @@ export default function repoMap(pi: ExtensionAPI) {
   pi.on(
     "before_provider_request",
     async (payload: Record<string, unknown>) => {
+      const debug = pi.getFlag("repo-map.debug");
+      const log = (...args: any[]) => { if (debug) console.error("[repo-map]", ...args); };
       try {
         // 1. Resolve git root
         const gitRoot = await resolveGitRoot(pi);
@@ -275,7 +285,14 @@ export default function repoMap(pi: ExtensionAPI) {
           ...fileMentions,
           ...identFileMatches,
         ]);
+
         const mentionedIdents = idents;
+
+        if (debug) {
+          log(`message: "${lastUserMsg.slice(0, 120)}${lastUserMsg.length > 120 ? "..." : ""}"`);
+          log(`source files: ${sourceFiles.length}, mentioned: ${mentionedFnames.size} files, ${mentionedIdents.size} idents`);
+          if (mentionedFnames.size > 0) log("files:", [...mentionedFnames].slice(0, 10));
+        }
 
         // 7. Generate map with mention hints (stdout only, no MAP.md)
         const args = [
@@ -293,14 +310,31 @@ export default function repoMap(pi: ExtensionAPI) {
 
         const pyResult = await pi.exec("python3", args, { timeout: 120000 });
         if (pyResult.exitCode !== 0 || !pyResult.stdout?.trim()) {
+          log(`generation failed: ${pyResult.stderr || "empty output"}`);
           pi.logger?.warn(
             `repo-map generation failed: ${pyResult.stderr || "empty output"}`,
           );
           return payload;
         }
 
+        if (debug) {
+          const beforeCount = Array.isArray(payload.messages) ? payload.messages.length : 0;
+          log(`map: ${pyResult.stdout.length} chars, messages before: ${beforeCount}`);
+        }
+
         // 8. Inject as user/assistant message pair (aider format)
-        return injectMapAsMessagePair(payload, pyResult.stdout.trim());
+        const injected = injectMapAsMessagePair(payload, pyResult.stdout.trim());
+
+        if (debug) {
+          const afterCount = Array.isArray(injected.messages) ? injected.messages.length : 0;
+          log(`messages after: ${afterCount} (added user+assistant pair)`);
+          const roles = Array.isArray(injected.messages)
+            ? (injected.messages as any[]).map((m: any) => m.role).join(" → ")
+            : "n/a";
+          log(`message roles: ${roles}`);
+        }
+
+        return injected;
       } catch (err) {
         pi.logger?.warn(`repo-map injection error: ${err}`);
         return payload;
