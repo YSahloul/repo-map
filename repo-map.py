@@ -64,28 +64,45 @@ def shutil_locate(name):
     return which(name)
 
 
-def generate_map(root, max_tokens=2000):
-    """Produce the repo map text using aider's RepoMap engine."""
+def generate_map(root, max_tokens=0):
+    """Produce the repo map text using aider's RepoMap engine.
+
+    max_tokens=0 means no limit — passes a large token budget.
+    Otherwise used as aider's map_tokens base (which gets 8x expanded
+    when chat_files is empty, matching aider's own behavior).
+    """
     aider_py = find_aider_python()
     if not aider_py:
         return None, "aider Python not found — install aider first"
-    other = tracked_files(root)
-    if not other:
+    raw_files = tracked_files(root)
+    if not raw_files:
         return None, "no tracked files found"
+
+    # 0 means no limit — use a very large budget
+    if max_tokens <= 0:
+        max_tokens = 1_000_000
+        ctx_window = 1_000_000
+    else:
+        ctx_window = max(8192, max_tokens * 8)
+
     script = textwrap.dedent(f"""
         import os, sys
         os.chdir({root!r})
+        from grep_ast import filename_to_lang
         class _IO:
             def read_text(self, path): return open(path, encoding='utf-8', errors='replace').read()
             def tool_output(self, msg): pass
             def tool_warning(self, msg): pass
             def tool_error(self, msg): pass
         class _Model:
+            max_context_window = {ctx_window}
             def token_count(self, text): return len(text) // 4
         from aider.repomap import RepoMap
         rm = RepoMap(root={root!r}, map_tokens={max_tokens}, io=_IO(), main_model=_Model())
-        other = {other!r}
-        result = rm.get_repo_map(chat_files=[], other_files=other)
+        # Only pass source files tree-sitter can parse
+        all_files = {raw_files!r}
+        src_files = [f for f in all_files if filename_to_lang(f)]
+        result = rm.get_repo_map(chat_files=[], other_files=src_files)
         if result:
             print(result)
     """)
@@ -103,7 +120,6 @@ def generate_map(root, max_tokens=2000):
     except FileNotFoundError:
         return None, f"aider python not found at {aider_py}"
 
-
 def head_sha(root):
     try:
         out = subprocess.run(
@@ -118,7 +134,7 @@ def head_sha(root):
 def main():
     ap = argparse.ArgumentParser(description="Generate MAP.md using aider's repomap engine.")
     ap.add_argument("path", nargs="?", default=os.getcwd(), help="start dir (default: cwd)")
-    ap.add_argument("--tokens", type=int, default=2000, help="max map tokens (default: 2000)")
+    ap.add_argument("--tokens", type=int, default=0, help="max map tokens (0 = no limit)")
     ap.add_argument("--quiet", action="store_true", help="suppress progress output on stderr")
     args = ap.parse_args()
 
