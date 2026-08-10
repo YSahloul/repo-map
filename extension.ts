@@ -258,22 +258,24 @@ export default function repoMap(pi: ExtensionAPI) {
       try {
         // 1. Resolve git root
         const gitRoot = await resolveGitRoot(pi);
-        if (!gitRoot) return payload;
+        if (!gitRoot) { log("skip: not a git repo"); return payload; }
         // 2. Per-project opt-out (.no-repo-map)
         if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) {
-          return payload;
+          log("skip: .no-repo-map found"); return payload;
         }
         // 3. Mode gate
         const mode = pi.getFlag("repo-map.mode");
-        if (mode !== "auto") return payload;
+        if (mode !== "auto") { log(`skip: mode=${mode}, not auto`); return payload; }
 
         // 4. Extract mentions from the last user message
         const lastUserMsg = getLastUserMessage(payload);
-        if (!lastUserMsg) return payload;
+        if (!lastUserMsg) { log("skip: no user message in payload"); return payload; }
 
         // 5. Get tracked source files
         const sourceFiles = await getSourceFiles(pi, gitRoot);
-        if (sourceFiles.length === 0) return payload;
+        if (sourceFiles.length === 0) { log("skip: no source files found"); return payload; }
+
+        log(`gitRoot=${gitRoot}, sourceFiles=${sourceFiles.length}, msg="${lastUserMsg.slice(0, 80)}"`);
 
         // 6. Extract file and identifier mentions
         const fileMentions = getFileMentions(lastUserMsg, sourceFiles);
