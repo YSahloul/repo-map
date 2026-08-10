@@ -254,7 +254,7 @@ export default function repoMap(pi: ExtensionAPI) {
     "before_provider_request",
     async (payload: Record<string, unknown>) => {
       const debug = pi.getFlag("repo-map.debug");
-      const log = (...args: any[]) => { if (debug) console.error("[repo-map]", ...args); };
+      const log = (...args: any[]) => { if (debug) pi.logger?.warn("[repo-map] " + args.join(" ")); };
       try {
         // 1. Resolve git root
         const gitRoot = await resolveGitRoot(pi);
