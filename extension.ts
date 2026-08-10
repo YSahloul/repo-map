@@ -133,7 +133,7 @@ export default function repoMap(pi: ExtensionAPI) {
         if (!gitRoot) { ctx.ui.notify("Not a git repository", "error"); return; }
         ctx.ui.notify("Generating MAP.md for " + path.basename(gitRoot) + "...", "info");
         const r = await pi.exec("python3", [scriptPath, gitRoot], { timeout: 120000 });
-        if (r.exitCode === 0) ctx.ui.notify("MAP.md generated at " + gitRoot, "success");
+        if (r.code === 0) ctx.ui.notify("MAP.md generated at " + gitRoot, "success");
         else ctx.ui.notify("repo-map failed: " + (r.stderr || "unknown error"), "error");
       } catch (e: any) { ctx.ui.notify("repo-map command failed: " + e, "error"); }
     },
@@ -175,8 +175,8 @@ export default function repoMap(pi: ExtensionAPI) {
         if (iMentions.size > 0) args.push("--mentioned-idents", JSON.stringify([...iMentions]));
 
         const pyResult = await pi.exec("python3", args, { timeout: 120000 });
-        if (pyResult.exitCode !== 0 || !pyResult.stdout?.trim()) {
-          L("gen-fail: exit=" + pyResult.exitCode + " stderr=" + (pyResult.stderr || "none").slice(0, 200));
+        if (pyResult.code !== 0 || !pyResult.stdout?.trim()) {
+          L("gen-fail: exit=" + pyResult.code + " stderr=" + (pyResult.stderr || "none").slice(0, 200));
           return payload;
         }
 
