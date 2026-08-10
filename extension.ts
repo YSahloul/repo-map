@@ -180,8 +180,9 @@ export default function repoMap(pi: ExtensionAPI) {
           return payload;
         }
 
-        L("map=" + pyResult.stdout.length + " chars");
+        L("generated " + pyResult.stdout.length + " chars — injecting");
         const injected = injectMapAsMessagePair(payload, pyResult.stdout.trim());
+        L("done — handler returned modified payload");
         return injected;
       } catch (e: any) {
         L("error: " + (e?.message || String(e)));
