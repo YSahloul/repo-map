@@ -189,7 +189,8 @@ export default function repoMap(pi: ExtensionAPI) {
         L("MODEL RECEIVES " + msgs.length + " messages:");
         for (let i = 0; i < msgs.length; i++) {
           const m = msgs[i];
-          const preview = typeof m.content === "string" ? m.content.slice(0, 100).replace(/\n/g, "\\n") : "[complex content]";
+          const isMap = typeof m.content === "string" && m.role === "user" && (m.content.includes("│def ") || m.content.includes("repo-map.py") || m.content.includes("⋮..."));
+          const preview = isMap ? m.content : (typeof m.content === "string" ? m.content.slice(0, 80).replace(/\n/g, "\\n") : "[complex]");
           L("  [" + i + "] " + m.role + ": " + preview);
         }
         return injected;

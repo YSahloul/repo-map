@@ -1,0 +1,73 @@
+{
+  "id": 1,
+  "protocol": "http",
+  "method": "POST",
+  "url": "https://api.anthropic.com/v1/messages?beta=true",
+  "headers": {
+    "accept": "application/json",
+    "accept-encoding": "gzip, deflate, br, zstd",
+    "anthropic-beta": "interleaved-thinking-2025-05-14,thinking-token-count-2026-05-13,context-management-2025-06-27,prompt-caching-scope-2026-01-05,structured-outputs-2025-12-15,effort-2025-11-24,mid-conversation-system-2026-04-07",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-version": "2023-06-01",
+    "authorization": "Bearer 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",
+    "connection": "keep-alive",
+    "content-type": "application/json",
+    "user-agent": "claude-cli/2.1.220 (external, claude-desktop)",
+    "x-app": "cli",
+    "x-claude-code-session-id": "019fee0b-a7db-7000-a163-3e8ea8bd8779",
+    "x-client-request-id": "b4cb114d-8bdc-4631-a650-e9315f345319",
+    "x-stainless-arch": "arm64",
+    "x-stainless-lang": "js",
+    "x-stainless-os": "Linux",
+    "x-stainless-package-version": "0.94.0",
+    "x-stainless-retry-count": "0",
+    "x-stainless-runtime": "node",
+    "x-stainless-runtime-version": "v26.3.0",
+    "x-stainless-timeout": "600"
+  },
+  "body": {
+    "model": "claude-sonnet-5",
+    "messages": [
+      {
+        "role": "user",
+        "content": [
+          {
+            "type": "text",
+            "text": "hello",
+            "cache_control": {
+              "type": "ephemeral",
+              "ttl": "1h"
+            }
+          }
+        ]
+      }
+    ],
+    "system": [
+      {
+        "type": "text",
+        "text": "x-anthropic-billing-header: cc_version=2.1.220.5bd; cc_entrypoint=claude-desktop; cch=7580c;"
+      },
+      {
+        "type": "text",
+        "text": "You are a Claude agent, built on Anthropic's Claude Agent SDK."
+      },
+      {
+        "type": "text",
+        "text": "You are a difficulty classifier for a coding agent. Read the user's request and decide how much reasoning effort the agent should spend on it this turn.\n\nReply with exactly one word — one of: `low`, `medium`, `high`, `xhigh`. No punctuation, no explanation, no other text.\n\nLevels:\n\n- `low` — Trivial or mechanical. A rename, a typo, a one-line edit, a formatting tweak, a direct factual question, or a request whose solution is obvious.\n- `medium` — A localized change that needs some reasoning. A small self-contained feature, a straightforward bug fix in one place, or explaining a moderate piece of code.\n- `high` — A non-trivial change. Spans multiple files or callers, requires real debugging, a moderate design decision, or a refactor with several moving parts.\n- `xhigh` — Deep or open-ended. Subtle concurrency or algorithmic problems, cross-system reasoning, ambiguous requirements, large or risky refactors, or hard root-cause debugging.\n\nJudge the inherent difficulty of the task, not how politely or verbosely it is phrased. When torn between two levels, choose the lower one.",
+        "cache_control": {
+          "type": "ephemeral",
+          "ttl": "1h"
+        }
+      }
+    ],
+    "tools": [],
+    "metadata": {
+      "user_id": "{\"session_id\":\"019fee0b-a7db-7000-a163-3e8ea8bd8779\",\"account_uuid\":\"a4e55722-e605-4c01-970f-522feccef6cd\",\"device_id\":\"1d10649f4052a0a8d033f10fa76ef36cb74bdfe8def8535636ad434e1162763a\"}"
+    },
+    "max_tokens": 1024,
+    "output_config": {
+      "effort": "low"
+    },
+    "stream": true
+  }
+}
