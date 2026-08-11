@@ -99,23 +99,38 @@ function getLastUserMessage(payload: Record<string, unknown>): string | null {
   return null;
 }
 
-function injectMapAsMessagePair(payload: Record<string, unknown>, mapContent: string): Record<string, unknown> {
+function injectMapAsMessagePair(payload: Record<string, unknown>, mapContent: string, afterSystem: boolean): Record<string, unknown> {
   let msgs: any[] | null = null;
+  let isNested = false;
   if (Array.isArray(payload.messages)) msgs = payload.messages as any[];
   else if (payload.payload && typeof payload.payload === "object") {
     const inner = payload.payload as Record<string, unknown>;
-    if (Array.isArray(inner.messages)) msgs = inner.messages as any[];
+    if (Array.isArray(inner.messages)) { msgs = inner.messages as any[]; isNested = true; }
   }
   if (!msgs) return payload;
-  let idx = -1;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    if (msgs[i]?.role === "user") { idx = i; break; }
+
+  if (afterSystem) {
+    // Aider positioning: after system messages, before conversation
+    let insertAt = 0;
+    for (let i = 0; i < msgs.length; i++) {
+      if (msgs[i]?.role === "system") insertAt = i + 1;
+    }
+    msgs.splice(insertAt, 0,
+      { role: "user", content: mapContent },
+      { role: "assistant", content: "Ok, I won't try and edit those files without asking first." },
+    );
+  } else {
+    // After last user message (legacy/fallback)
+    let idx = -1;
+    for (let i = msgs.length - 1; i >= 0; i--) {
+      if (msgs[i]?.role === "user") { idx = i; break; }
+    }
+    if (idx < 0) return payload;
+    msgs.splice(idx + 1, 0,
+      { role: "user", content: mapContent },
+      { role: "assistant", content: "Ok, I won't try and edit those files without asking first." },
+    );
   }
-  if (idx < 0) return payload;
-  msgs.splice(idx + 1, 0,
-    { role: "user", content: mapContent },
-    { role: "assistant", content: "Ok, I won't try and edit those files without asking first." },
-  );
   return payload;
 }
 
@@ -139,58 +154,54 @@ export default function repoMap(pi: ExtensionAPI) {
     },
   }); } catch {}
 
+  // Once-per-session injection (aider places the map between system + conversation, not after every user msg)
+  let mapInjected = false;
+
   try {
     pi.on("before_provider_request", async (payload: Record<string, unknown>) => {
       try {
-        const keys = Object.keys(payload);
-        const msgCount = Array.isArray(payload.messages) ? (payload.messages as any[]).length : 0;
-        const roleStr = Array.isArray(payload.messages) ? (payload.messages as any[]).map((m: any) => m.role).join(",") : "no-array";
-        L("fired: keys=" + keys.join(",") + " msgs=" + msgCount + " roles=[" + roleStr + "]");
+        const mode = pi.getFlag("repo-map.mode") || "auto";
+        if (mode !== "auto") return payload;
 
         const gitRoot = await resolveGitRoot(pi);
-        if (!gitRoot) { L("skip: not git repo"); return payload; }
-        if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) { L("skip: .no-repo-map"); return payload; }
-
-        const mode = pi.getFlag("repo-map.mode") || "auto";
-        if (mode !== "auto") { L("skip: mode=" + mode); return payload; }
+        if (!gitRoot) return payload;
+        if (fs.existsSync(path.join(gitRoot, ".no-repo-map"))) return payload;
 
         const lastMsg = getLastUserMessage(payload);
-        if (!lastMsg) { L("skip: no user msg"); return payload; }
+        if (!lastMsg) return payload;
 
         const srcFiles = await getSourceFiles(pi, gitRoot);
-        if (!srcFiles.length) { L("skip: no src files in " + gitRoot); return payload; }
-
-        L("src=" + srcFiles.length + " msg=" + lastMsg.slice(0, 80));
+        if (!srcFiles.length) return payload;
 
         const fMentions = getFileMentions(lastMsg, srcFiles);
         const iMentions = getIdentMentions(lastMsg);
         const iMatches = getIdentFilenameMatches(iMentions, srcFiles);
         const mFiles = new Set([...fMentions, ...iMatches]);
 
-        L("mentioned: " + mFiles.size + " files, " + iMentions.size + " idents");
-        if (mFiles.size > 0) L("files: " + [...mFiles].slice(0, 10).join(", "));
-
         const args = [scriptPath, gitRoot, "--quiet", "--no-file"];
         if (mFiles.size > 0) args.push("--mentioned-fnames", JSON.stringify([...mFiles]));
         if (iMentions.size > 0) args.push("--mentioned-idents", JSON.stringify([...iMentions]));
 
         const pyResult = await pi.exec("python3", args, { timeout: 120000 });
-        if (pyResult.code !== 0 || !pyResult.stdout?.trim()) {
-          L("gen-fail: exit=" + pyResult.code + " stderr=" + (pyResult.stderr || "none").slice(0, 200));
-          return payload;
-        }
+        if (pyResult.code !== 0 || !pyResult.stdout?.trim()) return payload;
 
-        L("generated " + pyResult.stdout.length + " chars — injecting");
-        const injected = injectMapAsMessagePair(payload, pyResult.stdout.trim());
-        // Log what the model actually receives
+        // Inject after system messages (aider positioning), only once
+        const injectPos = !mapInjected ? true : false;
+        if (mapInjected) return payload; // already in history from first injection
+
+        const mapContent = pyResult.stdout.trim();
+        L("injecting map (" + mapContent.length + " chars, src=" + srcFiles.length + " files) after system msgs");
+        const injected = injectMapAsMessagePair(payload, mapContent, true);
+        mapInjected = true;
+
+        // Log message array
         const msgs = Array.isArray(injected.messages) || (injected.payload && typeof injected.payload === "object" && Array.isArray((injected.payload as any).messages))
           ? (Array.isArray(injected.messages) ? injected.messages as any[] : (injected.payload as any).messages as any[])
           : [];
-        L("MODEL RECEIVES " + msgs.length + " messages:");
-        for (let i = 0; i < msgs.length; i++) {
+        L("MODEL RECEIVES " + msgs.length + " messages (map at position after system):");
+        for (let i = 0; i < Math.min(msgs.length, 6); i++) {
           const m = msgs[i];
-          const isMap = typeof m.content === "string" && m.role === "user" && (m.content.includes("│def ") || m.content.includes("repo-map.py") || m.content.includes("⋮..."));
-          const preview = isMap ? m.content : (typeof m.content === "string" ? m.content.slice(0, 80).replace(/\n/g, "\\n") : "[complex]");
+          const preview = typeof m.content === "string" ? m.content.slice(0, 80).replace(/\n/g, "\\n") : "[complex]";
           L("  [" + i + "] " + m.role + ": " + preview);
         }
         return injected;

@@ -66,12 +66,12 @@ def shutil_locate(name):
     return which(name)
 
 
-def generate_map(root, max_tokens=0, mentioned_fnames=None, mentioned_idents=None):
+def generate_map(root, max_tokens=1024, mentioned_fnames=None, mentioned_idents=None, max_context_window=None):
     """Produce the repo map text using aider's RepoMap engine.
 
-    max_tokens=0 means no limit — passes a large token budget.
-    Otherwise used as aider's map_tokens base (which gets 8x expanded
-    when chat_files is empty, matching aider's own behavior).
+    max_tokens: aider's map_tokens base (default 1024). When chat_files is
+    empty, this gets 8x expanded (map_mul_no_files=8) capped at
+    max_context_window - 4096, matching aider's exact behavior.
 
     mentioned_fnames/mentioned_idents: optional sets to boost relevance
     of files/identifiers mentioned in the user's message (aider-style).
@@ -83,13 +83,9 @@ def generate_map(root, max_tokens=0, mentioned_fnames=None, mentioned_idents=Non
     if not raw_files:
         return None, "no tracked files found"
 
-    # 0 means no limit — use a very large budget
-    if max_tokens <= 0:
-        max_tokens = 1_000_000
-        ctx_window = 1_000_000
-    else:
-        ctx_window = max(8192, max_tokens * 8)
-
+    ctx_window = 1_000_000
+    if max_context_window:
+        ctx_window = max_context_window
     # Build mentioned_fnames/mentioned_idents args if provided
     mentions_arg = ""
     if mentioned_fnames is not None and mentioned_idents is not None:
